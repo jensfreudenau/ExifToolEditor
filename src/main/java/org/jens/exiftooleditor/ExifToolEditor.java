@@ -1,11 +1,15 @@
 package org.jens.exiftooleditor;
 
 import javafx.application.Application;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.control.ComboBox;
-import javafx.scene.layout.GridPane;
-import javafx.stage.Stage;
 import javafx.scene.control.*;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
+import javafx.stage.Stage;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -14,11 +18,17 @@ import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 
-import javafx.geometry.Insets;
-import javafx.geometry.Pos;
-import javafx.scene.layout.*;
-import javafx.stage.FileChooser;
-
+/**
+ jpackage \
+   --name ExifToolEditor \
+   --input target \
+   --main-jar /Users/jensfreudenau/Development/java/ExifToolEditor/out/artifacts/ExifToolEditor_jar/ExifToolEditor.jar \
+   --main-class org.jens.exiftooleditor.ExifToolEditor \
+   --icon src/main/resources/icon.icns \
+   --java-options "-Xmx1024m" \
+   --runtime-image $JAVA_HOME \
+   --app-version 1.1
+ */
 public class ExifToolEditor extends Application {
     private static final String EXIFTOOL_PATH = "/opt/homebrew/bin/exiftool";
     private static final File DEFAULT_IMAGE_DIR = new File("/Users/jensfreudenau/Pictures");
@@ -36,10 +46,9 @@ public class ExifToolEditor extends Application {
     public static void main(String[] args) {
         launch(args);
     }
+
     @Override
     public void start(Stage stage) throws IOException {
-        stage.setTitle("IPTC Metadaten-Editor (ExifTool)");
-
         categoryBox.getItems().addAll(
                 "UNK - unbekannt",
                 "ARC - Architektur",
@@ -79,19 +88,84 @@ public class ExifToolEditor extends Application {
 
         Button loadButton = new Button("Bild laden");
         Button saveButton = new Button("Metadaten speichern");
+        Button showExifDataButton = new Button("EXIF-Daten anzeigen");
 
-        HBox buttonBox = new HBox(10, loadButton, saveButton, imageLabel);
+        HBox buttonBox = new HBox(10, loadButton, saveButton, showExifDataButton, imageLabel);
         buttonBox.setAlignment(Pos.CENTER_LEFT);
         buttonBox.setPadding(new Insets(10));
 
         VBox root = new VBox(form, buttonBox);
         Scene scene = new Scene(root, 800, 600);
-        stage.setTitle("Exif Tool Keyword Editor");
+        stage.setTitle("Exif Tool Keyword Editor  V1.1");
         stage.setScene(scene);
         stage.show();
 
         loadButton.setOnAction(e -> loadImage(stage));
+        showExifDataButton.setOnAction(e -> showExifDataWindow());
         saveButton.setOnAction(e -> saveMetadata());
+    }
+
+    private void showExifDataWindow() {
+        if (selectedImages == null || selectedImages.length == 0) {
+            showError("Bitte zuerst ein Bild auswählen, um EXIF-Daten anzuzeigen.");
+            return;
+        }
+
+        // Wir zeigen die EXIF-Daten nur für das ERSTE ausgewählte Bild an,
+        // da die Anzeige für mehrere Bilder unübersichtlich werden könnte.
+        File imageFile = selectedImages[0];
+
+        Stage exifStage = new Stage();
+        exifStage.setTitle("EXIF-Daten für: " + imageFile.getName());
+
+        TextArea exifTextArea = new TextArea();
+        exifTextArea.setEditable(false); // Die Daten sollen nicht editierbar sein
+        exifTextArea.setWrapText(true);
+        exifTextArea.setPrefRowCount(20); // Mehr Zeilen für die Anzeige
+
+        ScrollPane scrollPane = new ScrollPane(exifTextArea); // Um Scrollen bei vielen Daten zu ermöglichen
+        scrollPane.setFitToWidth(true); // Passt die Breite des ScrollPane an den Inhalt an
+
+        VBox root = new VBox(scrollPane);
+        root.setPadding(new Insets(10));
+
+        Scene scene = new Scene(root, 600, 700); // Angepasste Größe für EXIF-Daten
+        exifStage.setScene(scene);
+        exifStage.show();
+
+        // EXIF-Daten in einem Hintergrund-Thread lesen, um die UI nicht zu blockieren
+        new Thread(() -> {
+            try {
+                // Befehl, um alle EXIF-Daten zu lesen (Standard-Ausgabe von ExifTool)
+                // -json gibt die Daten im JSON-Format aus, was später leichter zu parsen wäre
+                // für eine strukturiertere Anzeige. Für eine einfache Textanzeige ist -a -u -g1 -n gut.
+                // -a : Duplikate zulassen
+                // -u : Unbekannte Tags anzeigen
+                // -g1: Gruppennamen anzeigen (z.B. [EXIF], [IPTC])
+                // -n : Numerische Werte anzeigen (statt formatierten)
+                ProcessBuilder builder = new ProcessBuilder(EXIFTOOL_PATH, "-a", "-u", "-g1", "-n", imageFile.getAbsolutePath());
+                Process process = builder.start();
+                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+
+                StringBuilder exifOutput = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    exifOutput.append(line).append("\n");
+                }
+                process.waitFor(); // Warten, bis der Prozess beendet ist
+
+                // UI-Update muss im JavaFX Application Thread erfolgen
+                javafx.application.Platform.runLater(() -> {
+                    exifTextArea.setText(exifOutput.toString());
+                });
+
+            } catch (IOException | InterruptedException ex) {
+                javafx.application.Platform.runLater(() -> {
+                    exifTextArea.setText("Fehler beim Laden der EXIF-Daten:\n" + ex.getMessage());
+                });
+                ex.printStackTrace();
+            }
+        }).start();
     }
 
     private void addField(GridPane pane, int row, String label, Control field) {
@@ -108,6 +182,7 @@ public class ExifToolEditor extends Application {
         pane.add(new Label(label), 0, row);
         pane.add(area, 1, row);
     }
+
     private void loadImage(Stage stage) {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Bild auswählen");
@@ -121,6 +196,7 @@ public class ExifToolEditor extends Application {
             loadMetadataFromFile(selectedImages[0]);
         }
     }
+
     private void loadMetadataFromFile(File image) {
         try {
             String categoryValue = readTag(image, List.of("IPTC:Category", "XMP:Category"));
@@ -129,15 +205,17 @@ public class ExifToolEditor extends Application {
                     .findFirst().ifPresent(categoryBox::setValue);
 
             String keywordsRaw = readTag(image, List.of("IPTC:Keywords", "XMP-dc:Subject"));
+            String keywordsReplacedBlank = keywordsRaw.replace(" ", "_");
+            String keywordsReplacedRaw = keywordsReplacedBlank.replace(",_", ",");
             if (multilineKeywords.isSelected()) {
-                keywordsArea.setText(keywordsRaw.replace(", ", "\n"));
+                keywordsArea.setText(keywordsReplacedRaw.replace(", ", "\n"));
             } else {
-                keywordsArea.setText(keywordsRaw);
+                keywordsArea.setText(keywordsReplacedRaw);
             }
 
             titleField.setText(readTag(image, List.of("IPTC:ObjectName", "XMP-dc:Title")));
             descriptionArea.setText(readTag(image, List.of("IPTC:Caption-Abstract", "XMP-dc:Description")));
-            websiteField.setText(readTag(image, List.of("IPTC:Source", "XMP-dc:Source", "XMP:URL")));
+            websiteField.setText(readTag(image, List.of("IPTC:Creator Work URL", "XMP:Creator Work URL")));
 
         } catch (Exception ex) {
             showError("Fehler beim Lesen:\n" + ex.getMessage());
@@ -162,12 +240,12 @@ public class ExifToolEditor extends Application {
                 command.add("-overwrite_original");
                 command.add("-IPTC:Keywords=");
                 command.add("-XMP-dc:Subject=");
-
                 for (String kw : keywords) {
                     kw = kw.trim();
                     if (!kw.isEmpty()) {
                         command.add("-IPTC:Keywords=" + kw);
                         command.add("-XMP-dc:Subject=" + kw);
+                        command.add("-overwrite_original");
                     }
                 }
 
