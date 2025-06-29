@@ -1,0 +1,22 @@
+UNK - unbekannt
+ARC - Architektur
+ART - Artist
+CHZ - Schweiz
+COD - Code
+FRA - Frankreich
+GER - Deutschland
+GES - Gesellschaft
+ITA - Italien
+KUL - Kultur
+LAN - Landschaft
+NAC - Nacht
+NAT - Natur
+PAR - Park
+POL - Politik
+REI - Reisen
+SAD - Server Administration
+SIG - Zeichen
+SPA - Spain
+SPO - Sport
+STR - street
+WIR - Wirtschaft

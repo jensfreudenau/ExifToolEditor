@@ -11,36 +11,37 @@ import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 /**
- jpackage \
-   --name ExifToolEditor \
-   --input target \
-   --main-jar /Users/jensfreudenau/Development/java/ExifToolEditor/out/artifacts/ExifToolEditor_jar/ExifToolEditor.jar \
-   --main-class org.jens.exiftooleditor.ExifToolEditor \
-   --icon src/main/resources/icon.icns \
-   --java-options "-Xmx1024m" \
-   --runtime-image $JAVA_HOME \
-   --app-version 1.1
+ * jpackage \
+ * --name ExifToolEditor \
+ * --input target \
+ * --main-jar /Users/jensfreudenau/Development/java/ExifToolEditor/out/artifacts/ExifToolEditor_jar/ExifToolEditor.jar \
+ * --main-class org.jens.exiftooleditor.ExifToolEditor \
+ * --icon src/main/resources/icon.icns \
+ * --java-options "-Xmx1024m" \
+ * --runtime-image $JAVA_HOME \
+ * --app-version 1.2.2
  */
 public class ExifToolEditor extends Application {
     private static final String EXIFTOOL_PATH = "/opt/homebrew/bin/exiftool";
     private static final File DEFAULT_IMAGE_DIR = new File("/Users/jensfreudenau/Pictures");
-
+    // Im resources-Ordner
+    private static final String CATEGORIES_FILE_PATH = "categories.txt";
+    private static final String WEBSITES_FILE_PATH = "websites.txt";
     private File[] selectedImages;
 
     private final ComboBox<String> categoryBox = new ComboBox<>();
+    private final ComboBox<String> websiteBox = new ComboBox<>();
     private final CheckBox multilineKeywords = new CheckBox("Ein Schlagwort pro Zeile");
     private final TextArea keywordsArea = new TextArea();
     private final TextField titleField = new TextField();
     private final TextArea descriptionArea = new TextArea();
-    private final TextField websiteField = new TextField();
     private final Label imageLabel = new Label("Kein Bild ausgewählt");
 
     public static void main(String[] args) {
@@ -49,42 +50,30 @@ public class ExifToolEditor extends Application {
 
     @Override
     public void start(Stage stage) throws IOException {
-        categoryBox.getItems().addAll(
-                "UNK - unbekannt",
-                "ARC - Architektur",
-                "ART - Artist",
-                "CHZ - Schweiz",
-                "COD - Code",
-                "FRA - Frankreich",
-                "GER - Deutschland",
-                "GES - Gesellschaft",
-                "ITA - Italien",
-                "KUL - Kultur",
-                "LAN - Landschaft",
-                "NAC - Nacht",
-                "NAT - Natur",
-                "PAR - Park",
-                "POL - Politik",
-                "REI - Reisen",
-                "SAD - Server Administration",
-                "SIG - Zeichen",
-                "SPA - Spain",
-                "SPO - Sport",
-                "STR - street",
-                "WIR - Wirtschaft"
-        );
-
+        List<String> categories = loadFromTextFile(CATEGORIES_FILE_PATH);
+        if (!categories.isEmpty()) {
+            categoryBox.getItems().addAll(categories);
+        } else {
+            System.err.println("Warnung: Kategorien-Datei konnte nicht gelesen werden oder ist leer.");
+        }
+        List<String> websites = loadFromTextFile(WEBSITES_FILE_PATH);
+        if (!websites.isEmpty()) {
+            websiteBox.getItems().addAll(websites);
+        } else {
+            System.err.println("Warnung: Kategorien-Datei konnte nicht gelesen werden oder ist leer.");
+        }
         GridPane form = new GridPane();
         form.setPadding(new Insets(10));
         form.setHgap(10);
         form.setVgap(10);
-
-        addField(form, 0, "Kategorie:", categoryBox);
-        addField(form, 1, "Überschrift:", titleField);
-        addArea(form, 2, "Beschreibung:", descriptionArea);
-        addField(form, 3, "Webseite:", websiteField);
-        addArea(form, 4, "Schlagwörter:", keywordsArea);
-        form.add(multilineKeywords, 1, 5);
+        int row = 0;
+        addField(form, row++, "Kategorie:", categoryBox, 128);
+        addField(form, row++, "Websites:", websiteBox, 128);
+//        addField(form, row++, "Überschrift:", titleField, 64);//64
+        addField(form, row++, "Überschrift:", titleField, 64);
+        addArea(form, row++, "Beschreibung:", descriptionArea);
+        addArea(form, row++, "Schlagwörter:", keywordsArea);
+        form.add(multilineKeywords, 1, row++);
 
         Button loadButton = new Button("Bild laden");
         Button saveButton = new Button("Metadaten speichern");
@@ -105,16 +94,43 @@ public class ExifToolEditor extends Application {
         saveButton.setOnAction(e -> saveMetadata());
     }
 
+    private List<String> loadFromTextFile(String path) {
+        List<String> list = new ArrayList<>();
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream(path);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(Objects.requireNonNull(is, "Website-Datei nicht als Ressource gefunden!")))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (!line.isEmpty()) {
+                    list.add(line);
+                }
+            }
+        } catch (IOException | NullPointerException e) {
+            System.err.println("Fehler beim Laden der Websites aus der Ressource: " + path + "\n" + e.getMessage());
+            try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (!line.isEmpty()) {
+                        list.add(line);
+                    }
+                }
+            } catch (IOException ex) {
+                System.err.println("Fehler beim Laden der Websites aus dem Dateisystem: " + path + "\n" + ex.getMessage());
+                showError("Websites konnten nicht geladen werden.\n" + ex.getMessage());
+            }
+        }
+        return list;
+    }
+
     private void showExifDataWindow() {
         if (selectedImages == null || selectedImages.length == 0) {
             showError("Bitte zuerst ein Bild auswählen, um EXIF-Daten anzuzeigen.");
             return;
         }
-
         // Wir zeigen die EXIF-Daten nur für das ERSTE ausgewählte Bild an,
         // da die Anzeige für mehrere Bilder unübersichtlich werden könnte.
         File imageFile = selectedImages[0];
-
         Stage exifStage = new Stage();
         exifStage.setTitle("EXIF-Daten für: " + imageFile.getName());
 
@@ -168,11 +184,20 @@ public class ExifToolEditor extends Application {
         }).start();
     }
 
-    private void addField(GridPane pane, int row, String label, Control field) {
+    private void addField(GridPane pane, int row, String label, Control field, int maxLength) {
         pane.add(new Label(label), 0, row);
         pane.add(field, 1, row);
-        if (field instanceof TextField) {
-            ((TextField) field).setPrefWidth(600);
+
+        if (field instanceof TextField textField) {
+            textField.setPrefWidth(600);
+
+            if (maxLength > 0) { // Only apply if a positive maxLength is provided
+                textField.textProperty().addListener((observable, oldValue, newValue) -> {
+                    if (newValue.length() > maxLength) {
+                        textField.setText(oldValue); // Revert to the old value if limit exceeded
+                    }
+                });
+            }
         }
     }
 
@@ -206,17 +231,20 @@ public class ExifToolEditor extends Application {
 
             String keywordsRaw = readTag(image, List.of("IPTC:Keywords", "XMP-dc:Subject"));
             String keywordsReplacedBlank = keywordsRaw.replace(" ", "_");
-            String keywordsReplacedRaw = keywordsReplacedBlank.replace(",_", ",");
+            String keywordsReplacedUpperCase = keywordsReplacedBlank.replace(",_", ",");
+            String keywordsReplacedRaw = keywordsReplacedUpperCase.toLowerCase();
             if (multilineKeywords.isSelected()) {
                 keywordsArea.setText(keywordsReplacedRaw.replace(", ", "\n"));
             } else {
                 keywordsArea.setText(keywordsReplacedRaw);
             }
-
             titleField.setText(readTag(image, List.of("IPTC:ObjectName", "XMP-dc:Title")));
             descriptionArea.setText(readTag(image, List.of("IPTC:Caption-Abstract", "XMP-dc:Description")));
-            websiteField.setText(readTag(image, List.of("IPTC:Creator Work URL", "XMP:Creator Work URL")));
-
+            String websiteValue = readTag(image, List.of("IPTC:Creator Work URL", "XMP:Creator Work URL"));
+            String domainName = websiteValue.replaceAll("http(s)?://|www\\.|/.*", "");
+            websiteBox.getItems().stream()
+                    .filter(item -> item.startsWith(domainName))
+                    .findFirst().ifPresent(websiteBox::setValue);
         } catch (Exception ex) {
             showError("Fehler beim Lesen:\n" + ex.getMessage());
         }
@@ -227,9 +255,9 @@ public class ExifToolEditor extends Application {
             showError("Bitte zuerst ein Bild laden.");
             return;
         }
-
         try {
             String selectedCat = categoryBox.getValue().split(" - ")[0];
+            String selectedWebsite = websiteBox.getValue().split(" - ")[0];
             String[] keywords = multilineKeywords.isSelected()
                     ? keywordsArea.getText().split("\\r?\\n")
                     : keywordsArea.getText().split(",");
@@ -248,21 +276,16 @@ public class ExifToolEditor extends Application {
                         command.add("-overwrite_original");
                     }
                 }
-
                 command.add("-IPTC:ObjectName=" + titleField.getText().trim());
                 command.add("-XMP-dc:Title=" + titleField.getText().trim());
-
                 command.add("-IPTC:Caption-Abstract=" + descriptionArea.getText().trim());
                 command.add("-XMP-dc:Description=" + descriptionArea.getText().trim());
-
                 command.add("-IPTC:Category=" + selectedCat);
                 command.add("-XMP:Category=" + selectedCat);
                 command.add("-XMP-dc:Subject+=" + selectedCat);
-
-                command.add("-IPTC:Source=" + websiteField.getText().trim());
-                command.add("-XMP-dc:Source=" + websiteField.getText().trim());
-                command.add("-XMP:URL=" + websiteField.getText().trim());
-
+                command.add("-IPTC:Source=" + selectedWebsite);
+                command.add("-XMP-dc:Source=" + selectedWebsite);
+                command.add("-XMP:CreatorWorkURL=" + selectedWebsite);
                 command.add(imageFile.getAbsolutePath());
 
                 ProcessBuilder builder = new ProcessBuilder(command);
